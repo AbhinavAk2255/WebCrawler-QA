@@ -48,7 +48,9 @@ public class CrawlerService {
                 System.out.println("Crawling: " + currentUrl);
 
                 Document document = Jsoup.connect(currentUrl)
-                        .userAgent("Mozilla/5.0")
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .referrer("https://google.com")
+                        .followRedirects(true)
                         .timeout(10000)
                         .get();
 
