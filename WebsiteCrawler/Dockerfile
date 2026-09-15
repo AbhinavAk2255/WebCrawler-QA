@@ -5,33 +5,30 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-
-# Stage 2: Balanced Runtime Environment
+# Stage 2: Runtime Environment
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-# Switch to root user to perform package installations
+# Switch to root user to install packages
 USER root
 
-# Install the correct, modern system libraries required by Playwright browsers
+# Install minimal core tools needed for setup scripts
 RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     gnupg \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libgdk-pixbuf2.0-0 \
-    libgtk-3-0 \
-    libgbm1 \
-    libnss3 \
-    libxss1 \
-    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the compiled JAR from Stage 1
+# Copy your compiled JAR file from Stage 1
 COPY --from=build /app/target/*.jar app.jar
 
-# Define Playwright environment variables to force internal browser downloads during execution
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
+# --- THE MAGIC FIX FOR PLAYWRIGHT DEPENDENCIES ---
+# We download the Playwright CLI tool and tell it to figure out the OS package names automatically
+RUN curl -fsSL https://nodesource.com | bash - \
+    && apt-get install -y nodejs \
+    && npx playwright install-deps chromium \
+    && apt-get purge -y nodejs curl \
+    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8080
 
