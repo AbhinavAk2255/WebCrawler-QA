@@ -1,29 +1,47 @@
-# Stage 1: Build the Spring Boot Application using Java 25
-FROM maven:3.9.16-eclipse-temurin-25 AS build
+
+# Stage 1: Build Spring Boot app
+
+FROM maven:3.9.16-eclipse-temurin-25-noble AS build
+
 WORKDIR /app
+
 COPY pom.xml .
 COPY src ./src
+
 RUN mvn clean package -DskipTests
 
-# Stage 2: Runtime Container using the EXACT SAME Java 25 base
-FROM eclipse-temurin:25-jre
+
+
+# Stage 2: Run Spring Boot + Playwright
+
+
+FROM eclipse-temurin:25-jre-noble
+
 WORKDIR /app
 
 USER root
 
-# Install nodejs, npm, and curl so Playwright's native installer script can run
-RUN apt-get update && apt-get install -y curl nodejs npm && rm -rf /var/lib/apt/lists/*
+# Install Node.js and npm temporarily.
+# We use the SAME Playwright version as the Java dependency.
+RUN apt-get update \
+    && apt-get install -y nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the compiled executable JAR file straight from Stage 1
+# Store Playwright browsers in a fixed shared location.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Install the EXACT Playwright version used by the Java application.
+# Java pom.xml currently uses Playwright 1.52.0.
+RUN npx -y playwright@1.52.0 install --with-deps chromium
+
+# Copy Spring Boot JAR
 COPY --from=build /app/target/*.jar app.jar
 
-# --- AUTOMATED PLAYWRIGHT DEPENDENCY INSTALLER ---
-# This forces Playwright to auto-detect the correct OS library names dynamically on Render
-RUN npx playwright install-deps chromium \
-    && apt-get purge -y nodejs npm curl \
+# Remove Node.js/npm because they are no longer needed at runtime.
+RUN apt-get purge -y nodejs npm \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8080
 
-# Starts your service instantly, matching Render's assigned port variable
 CMD ["sh", "-c", "java -jar app.jar --server.port=${PORT:-8080}"]
