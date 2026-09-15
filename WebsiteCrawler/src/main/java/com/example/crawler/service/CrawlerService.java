@@ -32,7 +32,8 @@ public class CrawlerService {
         Set<String> visitedUrls = new HashSet<>();
         List<CrawledPage> crawledPages = new ArrayList<>();
 
-        urlsToVisit.add(startUrl);
+        String normalizedStartUrl = normalizeUrl(startUrl);
+        urlsToVisit.add(normalizedStartUrl);
         
         try(Playwright playwright = Playwright.create()) {
         	
@@ -129,11 +130,13 @@ public class CrawlerService {
 	                }
 	                // Add internal links to queue
 	                for (String nextUrl : crawledPage.getInternalLinks()) {
-	
-	                    if (!visitedUrls.contains(nextUrl)
-	                            && !urlsToVisit.contains(nextUrl)) {
-	
-	                        urlsToVisit.add(nextUrl);
+
+	                    String normalizedNextUrl = normalizeUrl(nextUrl);
+
+	                    if (!visitedUrls.contains(normalizedNextUrl)
+	                            && !urlsToVisit.contains(normalizedNextUrl)) {
+
+	                        urlsToVisit.add(normalizedNextUrl);
 	                    }
 	                }
 	
@@ -165,6 +168,23 @@ public class CrawlerService {
                 + crawledPages.size());
 
         return knowledgeDocument;
+    }
+    
+    private String normalizeUrl(String url) {
+        try {
+            URI uri = URI.create(url.trim());
+
+            return new URI(
+                    uri.getScheme(),
+                    uri.getAuthority(),
+                    uri.getPath(),
+                    uri.getQuery(),
+                    null
+            ).toString();
+
+        } catch (Exception e) {
+            return url;
+        }
     }
 }
 
