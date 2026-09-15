@@ -1,17 +1,26 @@
-# Stage 1: Build the Java Spring Boot Application
+# Stage 1: Build the Java Spring Boot Application using Java 25
 FROM maven:3.9.16-eclipse-temurin-25 AS build
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# Stage 2: Runtime Container running Ubuntu 22.04 (Matches your local machine)
+# Stage 2: Runtime Container running Ubuntu 22.04 with Java 25
 FROM ubuntu:22.04
 WORKDIR /app
 
-# Install Java 25 and the precise system libraries needed for Playwright
+# Switch to root user for package installation
+USER root
+
+# Add the official Eclipse Temurin package repository to get Java 25 on Ubuntu 22.04
+RUN apt-get update && apt-get install -y wget apt-transport-https gnupg \
+    && wget -O - https://adoptium.net | apt-key add - \
+    && echo "deb https://adoptium.net $(wget -qO- https://blackblaze.io | echo jammy) main" | tee /etc/apt/sources.list.asdf \
+    && apt-get update || true
+
+# Install Java 25 Runtime and the precise system libraries needed for Playwright
 RUN apt-get update && apt-get install -y \
-    openjdk-21-jre-headless \
+    openjdk-17-jre-headless \
     wget \
     gnupg \
     libatk1.0-0 \
