@@ -5,29 +5,23 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# Stage 2: Balanced Runtime Environment using the EXACT SAME Java 25 base
+# Stage 2: Runtime Container using the EXACT SAME Java 25 base
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-# Switch to root user to perform setup tasks safely
 USER root
 
-# Install the correct system libraries that Playwright browsers need to run natively
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libgdk-pixbuf2.0-0 \
-    libgtk-3-0 \
-    libgbm1 \
-    libnss3 \
-    libxss1 \
-    libasound2t64 \
-    && rm -rf /var/lib/apt/lists/*
+# Install nodejs, npm, and curl so Playwright's native installer script can run
+RUN apt-get update && apt-get install -y curl nodejs npm && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled executable JAR file straight from Stage 1
 COPY --from=build /app/target/*.jar app.jar
+
+# --- AUTOMATED PLAYWRIGHT DEPENDENCY INSTALLER ---
+# This forces Playwright to auto-detect the correct OS library names dynamically on Render
+RUN npx playwright install-deps chromium \
+    && apt-get purge -y nodejs npm curl \
+    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8080
 
