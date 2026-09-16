@@ -1,6 +1,7 @@
 package com.example.crawler.service;
 
-import java.util.HashSet;
+import java.net.URI;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 import org.jsoup.nodes.Document;
@@ -13,176 +14,134 @@ import com.example.crawler.model.CrawledPage;
 @Service
 public class ContentExtractorService {
 
-    public CrawledPage extract(Document document, String url) {
+  // caps to avoid memory blow-ups on modern sites
+  private static final int MAX_HEADINGS = 200;
+  private static final int MAX_PARAGRAPH_SENTENCES = 400;
+  private static final int MAX_LIST_ITEMS = 400;
+  private static final int MAX_TABLES = 50;
+  private static final int MAX_IMAGES = 120;
+  private static final int MAX_VIDEOS = 60;
+  private static final int MAX_DOCS = 60;
+  private static final int MAX_LINKS = 600;
 
-        CrawledPage page = new CrawledPage();
+  public CrawledPage extract(Document document, String url) {
+    CrawledPage page = new CrawledPage();
+    page.setUrl(url);
+    page.setTitle(document.title());
 
-        page.setUrl(url);
-        page.setTitle(document.title());
-
-        // Remove unnecessary elements
-        document.select("script, style, noscript, nav, footer").remove();
-
-        // Headings
-        Elements headings = document.select("h1, h2, h3, h4, h5, h6");
-
-        for (Element heading : headings) {
-
-            String text = heading.text().trim();
-
-            if (!text.isEmpty()) {
-                page.getHeadings().add(text);
-            }
-        }
-
-        // Paragraphs
-        Elements paragraphs = document.select("main p, article p, section p");
-
-        if (paragraphs.isEmpty()) {
-            paragraphs = document.select("p");
-        }
-
-        for (Element paragraph : paragraphs) {
-
-            String text = paragraph.text().trim();
-
-            if (!text.isEmpty() && text.length() > 20) {
-
-                // Split paragraph into sentences
-                String[] sentences = text.split("(?<=[.!?])\\s+");
-
-                for (String sentence : sentences) {
-
-                    sentence = sentence.trim();
-
-                    if (!sentence.isEmpty()) {
-                        page.getParagraphs().add(sentence);
-                    }
-                }
-            }
-        }
-
-        // Lists
-        Elements lists = document.select("ul li, ol li");
-
-        for (Element list : lists) {
-
-            String text = list.text().trim();
-
-            if (!text.isEmpty()) {
-                page.getLists().add(text);
-            }
-        }
-
-        // Tables
-        Elements tables = document.select("table");
-
-        for (Element table : tables) {
-
-            String text = table.text().trim();
-
-            if (!text.isEmpty()) {
-                page.getTables().add(text);
-            }
-        }
-
-        // Images
-        Elements images = document.select("img[src]");
-
-        for (Element image : images) {
-
-            String imageUrl = image.absUrl("src");
-
-            if (!imageUrl.isEmpty()) {
-                page.getImages().add(imageUrl);
-            }
-        }
-
-        // Videos
-        Elements videos = document.select("video[src], video source[src], iframe[src]");
-
-        for (Element video : videos) {
-
-            String videoUrl;
-
-            if (video.tagName().equals("source")) {
-                videoUrl = video.absUrl("src");
-            } else {
-                videoUrl = video.absUrl("src");
-            }
-
-            if (!videoUrl.isEmpty()) {
-                page.getVideos().add(videoUrl);
-            }
-        }
-
-        // Documents
-        Elements links = document.select("a[href]");
-
-        for (Element link : links) {
-
-            String linkUrl = link.absUrl("href");
-
-            if (linkUrl.isEmpty()) {
-                continue;
-            }
-
-            String lowerUrl = linkUrl.toLowerCase();
-
-            if (lowerUrl.endsWith(".pdf")
-                    || lowerUrl.endsWith(".doc")
-                    || lowerUrl.endsWith(".docx")
-                    || lowerUrl.endsWith(".xls")
-                    || lowerUrl.endsWith(".xlsx")
-                    || lowerUrl.endsWith(".ppt")
-                    || lowerUrl.endsWith(".pptx")) {
-
-                page.getDocuments().add(linkUrl);
-            }
-        }
-
-        // Internal and external links
-        String startHost = document.baseUri();
-
-        try {
-
-            java.net.URI baseUri = java.net.URI.create(startHost);
-
-            Set<String> internalSet = new HashSet<>();
-            Set<String> externalSet = new HashSet<>();
-
-            for (Element link : links) {
-
-                String linkUrl = link.absUrl("href");
-
-                if (linkUrl.isEmpty()) {
-                    continue;
-                }
-
-                try {
-
-                    java.net.URI linkUri = java.net.URI.create(linkUrl);
-
-                    if (baseUri.getHost() != null
-                            && baseUri.getHost().equalsIgnoreCase(linkUri.getHost())) {
-
-                        internalSet.add(linkUrl);
-
-                    } else {
-
-                        externalSet.add(linkUrl);
-                    }
-
-                } catch (Exception ignored) {
-                }
-            }
-
-            page.getInternalLinks().addAll(internalSet);
-            page.getExternalLinks().addAll(externalSet);
-
-        } catch (Exception ignored) {
-        }
-
-        return page;
+    // --------- Extract links FIRST (before removing nav/footer) ----------
+    Elements linkElements = document.select("a[href]");
+    URI baseUri;
+    try {
+      baseUri = URI.create(url);
+    } catch (Exception e) {
+      baseUri = null;
     }
+
+    Set<String> internal = new LinkedHashSet<>();
+    Set<String> external = new LinkedHashSet<>();
+    Set<String> docs = new LinkedHashSet<>();
+
+    for (Element link : linkElements) {
+      if (internal.size() + external.size() >= MAX_LINKS) break;
+
+      String linkUrl = link.absUrl("href");
+      if (linkUrl == null || linkUrl.isBlank()) continue;
+
+      String lower = linkUrl.toLowerCase();
+
+      // ignore non-navigational links
+      if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("javascript:")) continue;
+      if (linkUrl.equals("#") || lower.endsWith("/#")) continue;
+
+      // documents
+      if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")
+          || lower.endsWith(".xls") || lower.endsWith(".xlsx")
+          || lower.endsWith(".ppt") || lower.endsWith(".pptx")) {
+        if (docs.size() < MAX_DOCS) docs.add(linkUrl);
+        continue;
+      }
+
+      // internal vs external
+      try {
+        URI linkUri = URI.create(linkUrl);
+        if (baseUri != null && baseUri.getHost() != null && linkUri.getHost() != null
+            && baseUri.getHost().equalsIgnoreCase(linkUri.getHost())) {
+          internal.add(linkUrl);
+        } else {
+          external.add(linkUrl);
+        }
+      } catch (Exception ignored) {}
+    }
+
+    page.getInternalLinks().addAll(internal);
+    page.getExternalLinks().addAll(external);
+    page.getDocuments().addAll(docs);
+
+    // --------- Now remove noisy elements for text extraction ----------
+    document.select("script, style, noscript").remove();
+
+    // For content extraction, removing nav/footer is fine
+    document.select("nav, footer").remove();
+
+    // Headings
+    Elements headings = document.select("h1, h2, h3, h4, h5, h6");
+    for (Element heading : headings) {
+      if (page.getHeadings().size() >= MAX_HEADINGS) break;
+      String text = heading.text().trim();
+      if (!text.isEmpty()) page.getHeadings().add(text);
+    }
+
+    // Paragraphs (sentences)
+    Elements paragraphs = document.select("main p, article p, section p");
+    if (paragraphs.isEmpty()) paragraphs = document.select("p");
+
+    for (Element paragraph : paragraphs) {
+      if (page.getParagraphs().size() >= MAX_PARAGRAPH_SENTENCES) break;
+
+      String text = paragraph.text().trim();
+      if (text.isEmpty() || text.length() <= 20) continue;
+
+      String[] sentences = text.split("(?<=[.!?])\\s+");
+      for (String s : sentences) {
+        if (page.getParagraphs().size() >= MAX_PARAGRAPH_SENTENCES) break;
+        s = s.trim();
+        if (!s.isEmpty()) page.getParagraphs().add(s);
+      }
+    }
+
+    // Lists
+    Elements lists = document.select("ul li, ol li");
+    for (Element li : lists) {
+      if (page.getLists().size() >= MAX_LIST_ITEMS) break;
+      String text = li.text().trim();
+      if (!text.isEmpty()) page.getLists().add(text);
+    }
+
+    // Tables
+    Elements tables = document.select("table");
+    for (Element table : tables) {
+      if (page.getTables().size() >= MAX_TABLES) break;
+      String text = table.text().trim();
+      if (!text.isEmpty()) page.getTables().add(text);
+    }
+
+    // Images (only URLs; actual bytes not downloaded by Jsoup)
+    Elements images = document.select("img[src]");
+    for (Element img : images) {
+      if (page.getImages().size() >= MAX_IMAGES) break;
+      String imageUrl = img.absUrl("src");
+      if (!imageUrl.isEmpty()) page.getImages().add(imageUrl);
+    }
+
+    // Videos/iframes
+    Elements videos = document.select("video[src], video source[src], iframe[src]");
+    for (Element v : videos) {
+      if (page.getVideos().size() >= MAX_VIDEOS) break;
+      String videoUrl = v.absUrl("src");
+      if (!videoUrl.isEmpty()) page.getVideos().add(videoUrl);
+    }
+
+    return page;
+  }
 }
